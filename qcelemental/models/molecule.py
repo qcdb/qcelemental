@@ -21,7 +21,7 @@ from ..molparse.to_string import to_string
 from ..periodic_table import periodictable
 from ..physical_constants import constants
 from ..testing import compare, compare_values
-from ..util import deserialize, measure_coordinates, msgpackext_loads, provenance_stamp, which_import
+from ..util import deserialize, measure_coordinates, msgpackext_loads, provenance_stamp, which_import, yaml_import
 from .basemodels import ProtoModel, qcschema_draft
 from .common_models import Provenance, qcschema_molecule_default
 from .types import Array
@@ -37,6 +37,8 @@ CHARGE_NOISE = 4
 _extension_map = {
     ".npy": "numpy",
     ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
     ".xyz": "xyz",
     ".psimol": "psi4",
     ".psi4": "psi4",
@@ -166,8 +168,7 @@ class Molecule(ProtoModel):
         "such as INCHI, canonical SMILES, etc. See the :class:``Identifiers`` model for more details.",
     )
     comment: Optional[str] = Field(  # type: ignore
-        None,
-        description="Additional comments for this molecule. Intended for pure human/user consumption and clarity.",
+        None, description="Additional comments for this molecule. Intended for pure human/user consumption and clarity."
     )
     molecular_charge: float = Field(0.0, description="The net electrostatic charge of the molecule.")  # type: ignore
     molecular_multiplicity: int = Field(1, description="The total multiplicity of the molecule.")  # type: ignore
@@ -886,6 +887,10 @@ class Molecule(ProtoModel):
         elif dtype == "json":
             assert isinstance(data, str)
             input_dict = json.loads(data)
+        elif dtype == "yaml":
+            yaml = yaml_import(raise_error=True)
+            assert isinstance(data, str)
+            input_dict = yaml.safe_load(data)
         elif dtype == "dict":
             assert isinstance(data, dict)
             input_dict = data
@@ -946,6 +951,11 @@ class Molecule(ProtoModel):
             with open(filename, "r") as infile:
                 data = json.load(infile)
             dtype = "dict"
+        elif dtype == "yaml":
+            yaml = yaml_import(raise_error=True)
+            with open(filename, "r") as infile:
+                data = yaml.safe_load(infile)
+            dtype = "dict"
         elif dtype == "msgpack":
             with open(filename, "rb") as infile_bytes:
                 data = deserialize(infile_bytes.read(), encoding="msgpack-ext")
@@ -955,7 +965,7 @@ class Molecule(ProtoModel):
 
         return cls.from_data(data, dtype, orient=orient, **kwargs)
 
-    def to_file(self, filename: str, dtype: Optional[str] = None) -> None:
+    def to_file(self, filename: str, dtype: Optional[str] = None, **kwargs: Dict[str, Any]) -> None:
         """Writes the Molecule to a file.
 
         Parameters
@@ -964,6 +974,8 @@ class Molecule(ProtoModel):
             The filename to write to
         dtype : Optional[str], optional
             The type of file to write, attempts to infer dtype from the filename if not provided.
+        **kwargs: Optional[Dict[str, Any]], optional
+            Additional keyword arguments to pass to the constructor.
 
         """
         ext = Path(filename).suffix
@@ -976,11 +988,11 @@ class Molecule(ProtoModel):
 
         flags = "w"
         if dtype in ["xyz", "xyz+", "psi4"]:
-            stringified = self.to_string(dtype)
-        elif dtype in ["json"]:
-            stringified = self.serialize("json")
+            stringified = self.to_string(dtype, **kwargs)
+        elif dtype in ["json", "yaml"]:
+            stringified = self.serialize(dtype, **kwargs)
         elif dtype in ["msgpack", "msgpack-ext"]:
-            stringified = self.serialize("msgpack-ext")
+            stringified = self.serialize("msgpack-ext", **kwargs)
             flags = "wb"
         elif dtype in ["numpy"]:
             elements = np.array(self.atomic_numbers).reshape(-1, 1)
